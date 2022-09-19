@@ -12,6 +12,17 @@ contract RPSGame {
         _;
     }
 
+    modifier validState(RPSGameState _state){
+        require(_gameData.state == _state,
+            string(abi.encodePacked("NOT ALLOWED! Expected game state = ",__getInputGameStateName(_state)," Received State =",__getInputGameStateName(_gameData.state))));
+        _;
+    }
+
+    modifier playerTurnPending(PlayerState _state){
+        require(_state != PlayerState.CHOICE_STORED,
+            string(abi.encodePacked("NOT ALLOWED! You have already played your turn.")));
+        _;
+    }
     // GameState - INITIATED after inital game setup, RESPONDED after responder adds hash choice, WIN or DRAW after final scoring
     enum RPSGameState {INITIATED, RESPONDED, WIN, DRAW}
     
@@ -21,6 +32,12 @@ contract RPSGame {
     // 0 before choices are stored, 1 for Rock, 2 for Paper, 3 for Scissors. Strings are stored only to generate comment with choice names
     string[4] choiceMap = ['None', 'Rock', 'Paper', 'Scissors'];
    
+   function __getInputGameStateName(RPSGameState state) private pure returns(string memory){
+        return (state == RPSGameState.INITIATED ? "INITIATED":
+                (state == RPSGameState.RESPONDED ? "RESPONDED" : 
+                    (state == RPSGameState.WIN ? "WIN" : "DRAW")));
+    }
+
     struct RPSGameData {
         address initiator; // Address of the initiator
         PlayerState initiator_state; // State of the initiator
@@ -66,18 +83,23 @@ contract RPSGame {
     }
 
     function getInvalidChoiceMessage() public pure returns( string memory){
-        return "Your input must be between 1 and 3" ;
+        return "Your input must be between 1 and 3. Please Enter 1 for Rock, 2 for Paper and 3 for Scissors" ;
     }
 
     // Responder stores their hashed choice. Game and player states are adjusted accordingly.
-    function addResponse(bytes32 _responder_hash) public {
+    function addResponse(bytes32 _responder_hash) public 
+    validState(RPSGameState.INITIATED)
+    {
         _gameData.responder_hash = _responder_hash;
         _gameData.state = RPSGameState.RESPONDED;
         _gameData.responder_state = PlayerState.PLAYED;
     }
     
     // Initiator adds raw choice number and random string. If responder has already done the same, the game should process the completion execution
-    function addInitiatorChoice(uint8 _choice, string memory _randomStr) public returns (bool) {
+    function addInitiatorChoice(uint8 _choice, string memory _randomStr) public 
+    validState(RPSGameState.RESPONDED) // initial response is already captured
+    playerTurnPending(_gameData.initiator_state) // player has not played their turn
+    returns (bool) {
         _gameData.initiator_choice = _choice;
         _gameData.initiator_random_str = _randomStr;
         _gameData.initiator_state = PlayerState.CHOICE_STORED;
@@ -88,7 +110,10 @@ contract RPSGame {
     }
 
     // Responder adds raw choice number and random string. If initiator has already done the same, the game should process the completion execution
-    function addResponderChoice(uint8 _choice, string memory _randomStr) public returns (bool) {
+    function addResponderChoice(uint8 _choice, string memory _randomStr) public 
+    validState(RPSGameState.RESPONDED)   // initial response is already captured
+    playerTurnPending(_gameData.responder_state) // player has not played their turn
+    returns (bool) {
         _gameData.responder_choice = _choice;
         _gameData.responder_random_str = _randomStr;
         _gameData.responder_state = PlayerState.CHOICE_STORED;
@@ -204,19 +229,11 @@ contract RPSGame {
     // Returns the address of the winner, GameState (2 for WIN, 3 for DRAW), and the comment
     function getResult() public view 
     gameResultReady()
-    returns (address, RPSGameState, string memory, uint8, uint8) {
-        return (_gameData.winner, _gameData.state, _gameData.comment, _gameData.initiator_choice,_gameData.responder_choice);
+    returns (address, RPSGameState, string memory) {
+        return (_gameData.winner, _gameData.state, _gameData.comment);
     } 
 
-    function __getGameState() public view returns (RPSGameState){
-        return _gameData.state;
-    } 
-
-    function __getInputGameStateName(RPSGameState state) public pure returns(string memory){
-        return (state == RPSGameState.INITIATED ? "INITIATED":
-                (state == RPSGameState.RESPONDED ? "RESPONDED" : 
-                    (state == RPSGameState.WIN ? "WIN" : "DRAW")));
-    }
+    
     
 }
 
@@ -229,13 +246,6 @@ contract RPSServer {
     modifier validAddress(address inputAddress) {
         require (inputAddress != address(0), "Input address can't be Zero address");
         require (msg.sender != inputAddress, "You can't compete with yourself");
-        _;
-    }
-
-    modifier validState(address _initiator, address _responder, RPSGame.RPSGameState _state){
-        RPSGame game = _gameList[_initiator][_responder];
-        require(game.__getGameState() == _state,
-            string(abi.encodePacked("NOT ALLOWED! Expected game state = ",game.__getInputGameStateName(_state)," Received State =",game.__getInputGameStateName(game.__getGameState()))));
         _;
     }
     
@@ -256,15 +266,14 @@ contract RPSServer {
     // Responder stores their hashed choice. Appropriate RPSGame function called   
     function respond(address _initiator, bytes32 _responder_hash) public 
     validAddress(_initiator) 
-    validState(_initiator, msg.sender,RPSGame.RPSGameState.INITIATED) {
+    {
         RPSGame game = _gameList[_initiator][msg.sender];
         game.addResponse(_responder_hash);
     }
 
     // Initiator adds raw choice number and random string. Appropriate RPSGame function called  
     function addInitiatorChoice(address _responder, uint8 _choice, string memory _randomStr) public 
-        validAddress(_responder) 
-        validState(msg.sender,_responder,RPSGame.RPSGameState.RESPONDED)  
+        validAddress(_responder)  
         validChoice(msg.sender,_responder,_choice)
         returns (bool) {
         RPSGame game = _gameList[msg.sender][_responder];
@@ -274,7 +283,6 @@ contract RPSServer {
     // Responder adds raw choice number and random string. Appropriate RPSGame function called
     function addResponderChoice(address _initiator, uint8 _choice, string memory _randomStr) public 
     validAddress(_initiator) 
-    validState(_initiator, msg.sender,RPSGame.RPSGameState.RESPONDED) 
     validChoice(_initiator,msg.sender,_choice) returns (bool) {
         RPSGame game = _gameList[_initiator][msg.sender];
         return game.addResponderChoice(_choice, _randomStr);
@@ -283,7 +291,7 @@ contract RPSServer {
     // Result details request by the initiator
     function getInitiatorResult(address _responder) public view 
     validAddress(_responder) 
-    returns (address, RPSGame.RPSGameState, string memory,uint8,uint8) {
+    returns (address, RPSGame.RPSGameState, string memory) {
         RPSGame game = _gameList[msg.sender][_responder];
         return game.getResult();
     }
@@ -291,7 +299,7 @@ contract RPSServer {
     // Result details request by the responder
     function getResponderResult(address _initiator) public view 
     validAddress(_initiator) 
-    returns (address, RPSGame.RPSGameState, string memory,uint8,uint8) {
+    returns (address, RPSGame.RPSGameState, string memory) {
         RPSGame game = _gameList[_initiator][msg.sender];
         return game.getResult();
     }
