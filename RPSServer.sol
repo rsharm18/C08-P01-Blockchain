@@ -243,9 +243,9 @@ contract RPSServer {
     // Mapping for each game instance with the first address being the initiator and internal key aaddress being the responder
     mapping(address => mapping(address => RPSGame)) _gameList;
 
-    modifier validAddress(address inputAddress) {
-        require (inputAddress != address(0), "Input address can't be Zero address");
-        require (msg.sender != inputAddress, "You can't compete with yourself");
+    modifier validOpponent(address _oponent) {
+        require (_oponent != address(0), "Oponent address can't be a Zero address");
+        require (msg.sender != _oponent, "You can't compete with yourself");
         _;
     }
     
@@ -258,14 +258,14 @@ contract RPSServer {
 
     // Initiator sets up the game and stores its hashed choice in the creation itself. New game created and appropriate function called    
     function initiateGame(address _responder, bytes32 _initiator_hash) public 
-    validAddress(_responder){
+    validOpponent(_responder){
         RPSGame game = new RPSGame(msg.sender, _responder, _initiator_hash);
         _gameList[msg.sender][_responder] = game;
     }
 
     // Responder stores their hashed choice. Appropriate RPSGame function called   
     function respond(address _initiator, bytes32 _responder_hash) public 
-    validAddress(_initiator) 
+    validOpponent(_initiator) 
     {
         RPSGame game = _gameList[_initiator][msg.sender];
         game.addResponse(_responder_hash);
@@ -273,7 +273,7 @@ contract RPSServer {
 
     // Initiator adds raw choice number and random string. Appropriate RPSGame function called  
     function addInitiatorChoice(address _responder, uint8 _choice, string memory _randomStr) public 
-        validAddress(_responder)  
+        validOpponent(_responder)  
         validChoice(msg.sender,_responder,_choice)
         returns (bool) {
         RPSGame game = _gameList[msg.sender][_responder];
@@ -282,7 +282,7 @@ contract RPSServer {
 
     // Responder adds raw choice number and random string. Appropriate RPSGame function called
     function addResponderChoice(address _initiator, uint8 _choice, string memory _randomStr) public 
-    validAddress(_initiator) 
+    validOpponent(_initiator) 
     validChoice(_initiator,msg.sender,_choice) returns (bool) {
         RPSGame game = _gameList[_initiator][msg.sender];
         return game.addResponderChoice(_choice, _randomStr);
@@ -290,7 +290,7 @@ contract RPSServer {
     
     // Result details request by the initiator
     function getInitiatorResult(address _responder) public view 
-    validAddress(_responder) 
+    validOpponent(_responder) 
     returns (address, RPSGame.RPSGameState, string memory) {
         RPSGame game = _gameList[msg.sender][_responder];
         return game.getResult();
@@ -298,7 +298,7 @@ contract RPSServer {
 
     // Result details request by the responder
     function getResponderResult(address _initiator) public view 
-    validAddress(_initiator) 
+    validOpponent(_initiator) 
     returns (address, RPSGame.RPSGameState, string memory) {
         RPSGame game = _gameList[_initiator][msg.sender];
         return game.getResult();
