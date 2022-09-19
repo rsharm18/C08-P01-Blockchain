@@ -5,8 +5,10 @@ pragma solidity 0.8.6;
 contract RPSGame {
 
     modifier gameResultReady(){
-        string memory errorMsg = string(abi.encodePacked("NOT ALLOWED! Game State must be in Draw/Win state."," Current state is ",_gameData.state ));
-        require((_gameData.state == RPSGameState.DRAW ||_gameData.state == RPSGameState.WIN), errorMsg);
+        require((_gameData.state == RPSGameState.DRAW ||_gameData.state == RPSGameState.WIN), 
+                string(abi.encodePacked("Result not Ready yet! Game State must be in Draw/Win state.",
+                " Current game state is ",
+                (_gameData.state == RPSGameState.INITIATED ? "INITIATED" : "RESPONDED") )));
         _;
     }
 
@@ -209,6 +211,12 @@ contract RPSGame {
     function __getGameState() public view returns (RPSGameState){
         return _gameData.state;
     } 
+
+    function __getInputGameStateName(RPSGameState state) public pure returns(string memory){
+        return (state == RPSGameState.INITIATED ? "INITIATED":
+                (state == RPSGameState.RESPONDED ? "RESPONDED" : 
+                    (state == RPSGameState.WIN ? "WIN" : "DRAW")));
+    }
     
 }
 
@@ -226,8 +234,7 @@ contract RPSServer {
 
     modifier gameInValidState(address _initiator, address _responder, RPSGame.RPSGameState _state){
         RPSGame game = _gameList[_initiator][_responder];
-        // enum RPSGameState {INITIATED, RESPONDED, WIN, DRAW}
-        require(game.__getGameState() == _state, "Game state does not match");
+        require(game.__getGameState() == _state,string(abi.encodePacked("NOT ALLOWED! Expected game state = ",game.__getInputGameStateName(_state)," Received State =",game.__getInputGameStateName(game.__getGameState()))));
         _;
     }
     
@@ -261,11 +268,8 @@ contract RPSServer {
     }
 
     // Responder adds raw choice number and random string. Appropriate RPSGame function called
-    function addResponderChoice(address _initiator, uint8 _choice, string memory _randomStr) public 
-    validAddress(_initiator) 
-    gameInValidState(_initiator, msg.sender,RPSGame.RPSGameState.RESPONDED) 
-    validChoice(_initiator,msg.sender,_choice)
-    returns (bool) {
+    function addResponderChoice(address _initiator, uint8 _choice, string memory _randomStr) public validAddress(_initiator) gameInValidState(_initiator, msg.sender,RPSGame.RPSGameState.RESPONDED) 
+    validChoice(_initiator,msg.sender,_choice) returns (bool) {
         RPSGame game = _gameList[_initiator][msg.sender];
         return game.addResponderChoice(_choice, _randomStr);
     }
